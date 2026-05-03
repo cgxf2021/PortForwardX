@@ -1,0 +1,40 @@
+# CMake / Ninja / local build trees
+build/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+compile_commands.json
+
+# Local install / staging prefix (cmake --install --prefix dist/...)
+dist/
+
+# Third-party: downloaded sources and build artifacts (keep scripts + README in repo)
+third_party/src/
+third_party/build/
+third_party/install/
+
+# IDE / editor
+.vs/
+.idea/
+*.user
+*.user.*
+*.suo
+*.sln.docstates
+*.swp
+*.swo
+*~
+.project
+.csettings/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
+*.bak
+
+# Tooling caches
+.cache/
+.clangd/

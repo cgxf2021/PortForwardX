@@ -1,0 +1,42 @@
+set(_install_prefix "$ENV{DESTDIR}@CMAKE_INSTALL_PREFIX@")
+set(_install_bin_dir "${_install_prefix}/@CMAKE_INSTALL_BINDIR@")
+set(_installed_exe "${_install_bin_dir}/portforwardx@CMAKE_EXECUTABLE_SUFFIX@")
+set(_third_party_root "@PORTFORWARDX_THIRD_PARTY_ROOT@")
+set(_third_party_boost_lib "${_third_party_root}/boost/lib")
+set(_third_party_boost_bin "${_third_party_root}/boost/bin")
+
+if(NOT EXISTS "${_installed_exe}")
+  message(WARNING "Runtime dependency scan skipped: executable not found: ${_installed_exe}")
+  return()
+endif()
+
+file(GET_RUNTIME_DEPENDENCIES
+  EXECUTABLES "${_installed_exe}"
+  RESOLVED_DEPENDENCIES_VAR _resolved_dependencies
+  UNRESOLVED_DEPENDENCIES_VAR _unresolved_dependencies
+  DIRECTORIES
+    "${_third_party_boost_lib}"
+    "${_third_party_boost_bin}"
+)
+
+set(_copied_count 0)
+foreach(_dep IN LISTS _resolved_dependencies)
+  string(FIND "${_dep}" "${_third_party_root}" _is_project_dep_pos)
+  if(_is_project_dep_pos EQUAL -1)
+    continue()
+  endif()
+
+  file(INSTALL
+    DESTINATION "${_install_bin_dir}"
+    TYPE SHARED_LIBRARY
+    FOLLOW_SYMLINK_CHAIN
+    FILES "${_dep}"
+  )
+  math(EXPR _copied_count "${_copied_count} + 1")
+endforeach()
+
+if(_unresolved_dependencies)
+  message(WARNING "Unresolved runtime dependencies: ${_unresolved_dependencies}")
+endif()
+
+message(STATUS "PortForwardX install: copied ${_copied_count} runtime dependency files")

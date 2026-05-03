@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-gcc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build g++ cmake
+      - name: Configure
+        run: cmake -S . -B build/linux -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DPORTFORWARDX_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build/linux
+      - name: Test
+        run: ctest --test-dir build/linux --output-on-failure
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build/win -G "Visual Studio 17 2022" -A x64 -DPORTFORWARDX_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build/win --config Debug
+      - name: Test
+        run: ctest --test-dir build/win --build-config Debug --output-on-failure
