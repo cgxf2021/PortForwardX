@@ -136,6 +136,66 @@ class UdpEchoServer {
   std::uint16_t port_{0};
 };
 
+bool SendUdpEchoToLocalhost(std::uint16_t port,
+                            const std::string& payload,
+                            std::string* error_message) {
+  TestSocket client = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);  // NOLINT
+  if (client == kInvalidTestSocket) {
+    *error_message = "client socket create failed";
+    return false;
+  }
+
+  sockaddr_in target{};
+  target.sin_family = AF_INET;
+  target.sin_port = htons(port);
+  inet_pton(AF_INET, "127.0.0.1", &target.sin_addr);
+
+#ifdef _WIN32
+  const int sent = sendto(client, payload.data(), static_cast<int>(payload.size()), 0,
+                          reinterpret_cast<const sockaddr*>(&target),
+                          static_cast<socklen_t>(sizeof(target)));
+#else
+  const ssize_t sent = sendto(client, payload.data(), payload.size(), 0,
+                              reinterpret_cast<const sockaddr*>(&target),
+                              static_cast<socklen_t>(sizeof(target)));
+#endif
+  if (sent <= 0) {
+    CloseSocket(client);
+    *error_message = "client send failed";
+    return false;
+  }
+
+#ifdef _WIN32
+  DWORD timeout_ms = 1500;
+  setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms),
+             sizeof(timeout_ms));
+#else
+  timeval timeout{};
+  timeout.tv_sec = 1;
+  timeout.tv_usec = 500 * 1000;
+  setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+#endif
+
+  std::array<char, 256> reply{};
+#ifdef _WIN32
+  const int received = recv(client, reply.data(), static_cast<int>(reply.size()), 0);
+#else
+  const ssize_t received = recv(client, reply.data(), reply.size(), 0);
+#endif
+  CloseSocket(client);
+
+  if (received <= 0) {
+    *error_message = "client recv failed";
+    return false;
+  }
+  const std::string echoed(reply.data(), static_cast<std::size_t>(received));
+  if (echoed != payload) {
+    *error_message = "payload mismatch: " + echoed;
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -165,7 +225,7 @@ int main() {
   cfg.target_port = echo.port();
   cfg.protocol = portforwardx::net::TransportProtocol::kUdp;
   cfg.family = portforwardx::net::AddressFamilyPreference::kIPv4Only;
-  cfg.dns_refresh_interval_seconds = 1;
+  cfg.dns_refresh_interval_minutes = 1;
 
   portforwardx::net::Forwarder forwarder(cfg);
   if (!forwarder.Start(&error)) {
@@ -174,67 +234,70 @@ int main() {
     return 1;
   }
 
-  TestSocket client = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);  // NOLINT
-  if (client == kInvalidTestSocket) {
-    forwarder.Stop();
-    echo.Stop();
-    std::cerr << "[FAIL] client socket create failed\n";
-    return 1;
-  }
-
-  sockaddr_in target{};
-  target.sin_family = AF_INET;
-  target.sin_port = htons(forwarder.ListeningPort());
-  inet_pton(AF_INET, "127.0.0.1", &target.sin_addr);
-
   const std::string payload = "udp-local-e2e";
-#ifdef _WIN32
-  const int sent = sendto(client, payload.data(), static_cast<int>(payload.size()), 0,
-                          reinterpret_cast<const sockaddr*>(&target),
-                          static_cast<socklen_t>(sizeof(target)));
-#else
-  const ssize_t sent = sendto(client, payload.data(), payload.size(), 0,
-                              reinterpret_cast<const sockaddr*>(&target),
-                              static_cast<socklen_t>(sizeof(target)));
-#endif
-  if (sent <= 0) {
-    CloseSocket(client);
+  if (!SendUdpEchoToLocalhost(forwarder.ListeningPort(), payload, &error)) {
     forwarder.Stop();
     echo.Stop();
-    std::cerr << "[FAIL] client send failed\n";
+    std::cerr << "[FAIL] " << error << "\n";
     return 1;
   }
 
-#ifdef _WIN32
-  DWORD timeout_ms = 1500;
-  setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms),
-             sizeof(timeout_ms));
-#else
-  timeval timeout{};
-  timeout.tv_sec = 1;
-  timeout.tv_usec = 500 * 1000;
-  setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-#endif
-
-  std::array<char, 256> reply{};
-#ifdef _WIN32
-  const int received = recv(client, reply.data(), static_cast<int>(reply.size()), 0);
-#else
-  const ssize_t received = recv(client, reply.data(), reply.size(), 0);
-#endif
-  CloseSocket(client);
   forwarder.Stop();
   echo.Stop();
 
-  if (received <= 0) {
-    std::cerr << "[FAIL] client recv failed\n";
+  UdpEchoServer chained_echo;
+  if (!chained_echo.Start(&error)) {
+    std::cerr << "[FAIL] " << error << "\n";
     return 1;
   }
-  const std::string echoed(reply.data(), static_cast<std::size_t>(received));
-  if (echoed != payload) {
-    std::cerr << "[FAIL] payload mismatch: " << echoed << "\n";
+
+  portforwardx::net::ForwardConfig server_cfg;
+  server_cfg.listen_host = "::1";
+  server_cfg.listen_port = 0;
+  server_cfg.listen_family = portforwardx::net::AddressFamilyPreference::kIPv6Only;
+  server_cfg.target_host = "127.0.0.1";
+  server_cfg.target_port = chained_echo.port();
+  server_cfg.target_family = portforwardx::net::AddressFamilyPreference::kIPv4Only;
+  server_cfg.protocol = portforwardx::net::TransportProtocol::kUdp;
+  server_cfg.dns_refresh_interval_minutes = 1;
+
+  portforwardx::net::Forwarder server_forwarder(server_cfg);
+  if (!server_forwarder.Start(&error)) {
+    chained_echo.Stop();
+    std::cerr << "[FAIL] server forwarder start failed: " << error << "\n";
     return 1;
   }
+
+  portforwardx::net::ForwardConfig client_cfg;
+  client_cfg.listen_host = "127.0.0.1";
+  client_cfg.listen_port = 0;
+  client_cfg.listen_family = portforwardx::net::AddressFamilyPreference::kIPv4Only;
+  client_cfg.target_host = "::1";
+  client_cfg.target_port = server_forwarder.ListeningPort();
+  client_cfg.target_family = portforwardx::net::AddressFamilyPreference::kIPv6Only;
+  client_cfg.protocol = portforwardx::net::TransportProtocol::kUdp;
+  client_cfg.dns_refresh_interval_minutes = 1;
+
+  portforwardx::net::Forwarder client_forwarder(client_cfg);
+  if (!client_forwarder.Start(&error)) {
+    server_forwarder.Stop();
+    chained_echo.Stop();
+    std::cerr << "[FAIL] client forwarder start failed: " << error << "\n";
+    return 1;
+  }
+
+  const std::string chained_payload = "udp-ipv4-ipv6-ipv4-e2e";
+  if (!SendUdpEchoToLocalhost(client_forwarder.ListeningPort(), chained_payload, &error)) {
+    client_forwarder.Stop();
+    server_forwarder.Stop();
+    chained_echo.Stop();
+    std::cerr << "[FAIL] chained " << error << "\n";
+    return 1;
+  }
+
+  client_forwarder.Stop();
+  server_forwarder.Stop();
+  chained_echo.Stop();
 
   std::cout << "[PASS] local udp e2e test\n";
   return 0;

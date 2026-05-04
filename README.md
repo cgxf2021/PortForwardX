@@ -147,41 +147,108 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPORTFORWARDX_ENABLE_WA
 
 ## 端口转发使用示例
 
-程序参数：
+`PortForwardX` 支持三种运行模式：
 
-- `--listen-host` 监听地址（可为 IPv4 或 IPv6，默认 `::`）
-- `--listen-port` 监听端口（必填）
-- `--target-host` 目标地址（可为 IPv4 / IPv6 / 域名，必填）
-- `--target-port` 目标端口（必填）
-- `--protocol` 传输协议：`tcp` / `udp`（默认 `tcp`）
-- `--family` 地址族策略：`auto` / `ipv4` / `ipv6`（默认 `auto`）
-- `--dns-refresh-sec` 目标域名解析刷新间隔（秒，默认 `30`）
+- `--mode server`：公网入口（通常 IPv6）转发到内网游戏服务（通常 IPv4）
+- `--mode client`：本地 IPv4 入口转发到远端公网 IPv6 服务
+- `--mode custom`：通用模式（兼容原始 `listen/target` 参数）
 
-### Linux 示例
+通用参数（所有模式可用）：
+
+- `--protocol`：`tcp` / `udp` / `both`（默认 `tcp`）
+- `--family`：`auto` / `ipv4` / `ipv6`（默认 `auto`）
+  - `custom` 模式：同时作用于监听侧和目标侧
+  - `server` 模式：`auto` 时公网监听侧默认使用 IPv6，目标侧自动解析
+  - `client` 模式：`auto` 时本地监听侧默认使用 IPv4，远端目标侧默认使用 IPv6
+- `--dns-refresh-min`：目标域名刷新间隔分钟数（默认 `10`）
+- `--udp-idle-timeout-sec`：UDP 会话空闲超时秒数（默认 `300`，`0` 表示不超时）
+- `--udp-debug`：打印 UDP 包级转发诊断日志（默认关闭）
+- 每次 DNS 刷新会打印详细映射：`[dns] refresh ok: example.com:443 -> ipv4 1.2.3.4:443, ipv6 [2001:db8::1]:443`
+
+### 方案一：服务端（公网 IPv6 -> 本地 IPv4 游戏服）
+
+假设：
+
+- 服务器公网 IPv6：`2001:db8::10`
+- 游戏服只监听本机 IPv4：`127.0.0.1:25565`
+- 对外暴露端口：`25565`
+
+Linux:
 
 ```bash
-./build/portforwardx --listen-host 127.0.0.1 --listen-port 18080 --target-host 1.1.1.1 --target-port 80 --protocol tcp --family ipv4
+./build/portforwardx --mode server --public-listen-host :: --public-listen-port 25565 --lan-target-host 127.0.0.1 --lan-target-port 25565 --protocol both --family auto
 ```
 
-### Windows 示例
+Windows:
 
 ```bat
-build\win-msvc-release\Release\portforwardx.exe --listen-host ::1 --listen-port 18443 --target-host one.one.one.one --target-port 443 --protocol tcp --family auto
+build\win-msvc-release\Release\portforwardx.exe --mode server --public-listen-host :: --public-listen-port 25565 --lan-target-host 127.0.0.1 --lan-target-port 25565 --protocol both --family auto
 ```
 
-### 地址族组合示例
+注意：`--lan-target-host` 必须是可连接的具体地址，例如 `127.0.0.1` 或服务器内网 IPv4。`0.0.0.0` 只适合作为服务程序监听地址，不能作为 PortForwardX 的转发目标。
 
-- `IPv4 -> IPv4`：`--listen-host 127.0.0.1 --target-host 127.0.0.1 --family ipv4`
-- `IPv6 -> IPv6`：`--listen-host ::1 --target-host ::1 --family ipv6`
-- `IPv4 -> IPv6`：`--listen-host 127.0.0.1 --target-host ::1 --family auto`
-- `IPv6 -> IPv4`：`--listen-host ::1 --target-host 127.0.0.1 --family auto`
+### 方案二：客户端（本地 IPv4 -> 远端公网 IPv6）
+
+客户端机器本地游戏程序只会连 IPv4，可先连本地转发入口：
+
+```bash
+./build/portforwardx --mode client --local-listen-host 127.0.0.1 --local-listen-port 25565 --server-ipv6-host 2001:db8::10 --server-port 25565 --protocol both --family auto
+```
+
+然后在游戏客户端内填：
+
+- 服务器地址：`127.0.0.1`
+- 端口：`25565`
+
+### 服务端运行日志
+
+运行中会输出以下关键日志，便于排查连通性：
+
+- `[tcp] client connected/disconnected ...`：TCP 客户端连接与断连
+- `[udp] client connected/disconnected ...`：UDP 客户端会话创建与清理（含原因）
+- `[dns] refresh ok/failed ...`：目标域名周期刷新结果；成功时会列出 IPv4/IPv6 解析地址
+- 开启 `--udp-debug` 后会额外输出 `[udp] client->target ...` 与 `[udp] target->client ...`，用于确认 UDP 包是否进入目标服务以及是否有回包
+
+脚本开启 UDP debug：
+
+```bat
+set UDP_DEBUG=1
+run_server.bat
+```
+
+PowerShell:
+
+```powershell
+.\run_server.ps1 -UdpDebug
+```
+
+### 自定义模式（兼容旧参数）
+
+`--mode custom` 使用原始参数：
+
+- `--listen-host` 监听地址（默认 `::`）
+- `--listen-port` 监听端口（必填）
+- `--target-host` 目标地址（必填）
+- `--target-port` 目标端口（必填）
+
+示例：
+
+```bash
+./build/portforwardx --mode custom --listen-host 127.0.0.1 --listen-port 18080 --target-host 1.1.1.1 --target-port 80 --protocol tcp --family ipv4
+```
 
 ### 域名解析示例
 
 域名可以直接作为目标地址，程序会通过 DNS 解析 A/AAAA 记录：
 
 ```bash
-./build/portforwardx --listen-host :: --listen-port 19000 --target-host example.com --target-port 443 --protocol tcp --family auto --dns-refresh-sec 10
+./build/portforwardx --mode custom --listen-host :: --listen-port 19000 --target-host example.com --target-port 443 --protocol tcp --family auto --dns-refresh-min 10
+```
+
+刷新日志示例：
+
+```text
+[dns] refresh ok: example.com:443 -> ipv4 93.184.216.34:443, ipv6 [2606:2800:220:1:248:1893:25c8:1946]:443
 ```
 
 ---

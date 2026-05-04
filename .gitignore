@@ -1,5 +1,6 @@
 # CMake / Ninja / local build trees
 build/
+reference/
 out/
 cmake-build-*/
 CMakeUserPresets.json

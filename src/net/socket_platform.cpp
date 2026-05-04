@@ -10,6 +10,12 @@ namespace {
 std::once_flag g_wsa_init_once;
 bool g_wsa_init_ok = false;
 std::string g_wsa_error;
+
+#ifdef _WIN32
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
+#endif
 }  // namespace
 
 bool EnsureSocketApiInitialized(std::string* error_message) {
@@ -103,6 +109,45 @@ bool SetIpv6Only(SocketHandle socket, bool enabled, std::string* error_message) 
         "setsockopt(IPV6_V6ONLY) failed: " + SocketErrorToString(err);
   }
   return false;
+}
+
+bool SetSocketBufferSize(SocketHandle socket, int buffer_size, std::string* error_message) {
+  const int send_rc = setsockopt(socket, SOL_SOCKET, SO_SNDBUF,
+                                 reinterpret_cast<const char*>(&buffer_size),
+                                 static_cast<socklen_t>(sizeof(buffer_size)));
+  const int recv_rc = setsockopt(socket, SOL_SOCKET, SO_RCVBUF,
+                                 reinterpret_cast<const char*>(&buffer_size),
+                                 static_cast<socklen_t>(sizeof(buffer_size)));
+  if (send_rc == 0 && recv_rc == 0) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    const int err = LastSocketError();
+    *error_message = "setsockopt(SO_SNDBUF/SO_RCVBUF) failed: " +
+                     SocketErrorToString(err);
+  }
+  return false;
+}
+
+bool DisableUdpConnReset(SocketHandle socket, std::string* error_message) {
+#ifdef _WIN32
+  DWORD bytes_returned = 0;
+  BOOL enabled = FALSE;
+  const int rc = WSAIoctl(socket, SIO_UDP_CONNRESET, &enabled, sizeof(enabled), nullptr, 0,
+                          &bytes_returned, nullptr, nullptr);
+  if (rc == 0) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    const int err = LastSocketError();
+    *error_message = "WSAIoctl(SIO_UDP_CONNRESET) failed: " + SocketErrorToString(err);
+  }
+  return false;
+#else
+  (void)socket;
+  (void)error_message;
+  return true;
+#endif
 }
 
 bool ShutdownRead(SocketHandle socket) {

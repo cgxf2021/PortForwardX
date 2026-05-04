@@ -44,6 +44,15 @@ else()
   message(FATAL_ERROR "PORTFORWARDX_THIRD_PARTY_LINK must be STATIC or SHARED")
 endif()
 
+if(MSVC)
+  if(PORTFORWARDX_THIRD_PARTY_LINK STREQUAL "STATIC")
+    # third_party/build_boost.* uses runtime-link=static (/MT); default VS is /MD.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  elseif(PORTFORWARDX_THIRD_PARTY_LINK STREQUAL "SHARED")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+  endif()
+endif()
+
 set(Boost_ROOT "${PORTFORWARDX_BOOST_ROOT}")
 list(PREPEND CMAKE_PREFIX_PATH "${PORTFORWARDX_BOOST_ROOT}")
 if(PORTFORWARDX_USE_ONLY_LOCAL_THIRD_PARTY)
@@ -138,6 +147,15 @@ if(PORTFORWARDX_BUILD_EXAMPLES)
 endif()
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/docs/manual.md DESTINATION . RENAME manual.md)
+install(PROGRAMS
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_server.sh
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_client.sh
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_server.ps1
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_client.ps1
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_server.bat
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_client.bat
+  DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
 
 install(EXPORT PortForwardXTargets
   FILE PortForwardXTargets.cmake

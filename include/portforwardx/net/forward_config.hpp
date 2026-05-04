@@ -22,8 +22,14 @@ struct ForwardConfig {
   std::string target_host;
   std::uint16_t target_port = 0;
   TransportProtocol protocol = TransportProtocol::kTcp;
+  // Legacy/default family preference. If listen_family/target_family stay auto
+  // and this is explicit, both sides use this value for backwards compatibility.
   AddressFamilyPreference family = AddressFamilyPreference::kAuto;
-  std::uint32_t dns_refresh_interval_seconds = 30;
+  AddressFamilyPreference listen_family = AddressFamilyPreference::kAuto;
+  AddressFamilyPreference target_family = AddressFamilyPreference::kAuto;
+  std::uint32_t dns_refresh_interval_minutes = 10;
+  std::uint32_t udp_session_idle_timeout_seconds = 300;
+  bool udp_debug = false;
   int backlog = 128;
 };
 

@@ -8,6 +8,7 @@
 #define NOMINMAX
 #endif
 #include <winsock2.h>
+#include <mstcpip.h>
 #include <ws2tcpip.h>
 using SocketHandle = SOCKET;
 constexpr SocketHandle kInvalidSocket = INVALID_SOCKET;
@@ -31,6 +32,8 @@ std::string SocketErrorToString(int error);
 void CloseSocket(SocketHandle socket);
 bool SetReuseAddress(SocketHandle socket, std::string* error_message);
 bool SetIpv6Only(SocketHandle socket, bool enabled, std::string* error_message);
+bool SetSocketBufferSize(SocketHandle socket, int buffer_size, std::string* error_message);
+bool DisableUdpConnReset(SocketHandle socket, std::string* error_message);
 bool ShutdownRead(SocketHandle socket);
 bool ShutdownWrite(SocketHandle socket);
 bool ShutdownBoth(SocketHandle socket);

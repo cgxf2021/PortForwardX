@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RootDir = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$RootDir = Split-Path -Parent $PSScriptRoot
 $ThirdPartyDir = Join-Path $RootDir "third_party"
 $SrcDir = Join-Path $ThirdPartyDir "src"
 $BuildDir = Join-Path $ThirdPartyDir "build/boost"
@@ -43,6 +43,7 @@ try {
     .\b2.exe `
       "--build-dir=$BuildDir" `
       "--prefix=$InstallDir" `
+      "address-model=64" `
       "link=$LinkType" `
       "runtime-link=$RuntimeLink" `
       "variant=release" `
